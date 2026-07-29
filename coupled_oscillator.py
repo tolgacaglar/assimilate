@@ -166,6 +166,57 @@ def coupled_oscillator_equations(t, state):
 
 
 # ---------------------------------------------------------------------------
+# Reusable state-advance function (e.g. for later use in an EnKF forecast step)
+# ---------------------------------------------------------------------------
+
+def advance_coupled_oscillator_state(
+    x1, v1, x2, v2, m1, m2, k1, k2, c1, c2, t, dt,
+    method="RK45", rtol=1e-6, atol=1e-9,
+):
+    """
+    Advance the coupled-oscillator state from time t to time t + dt.
+
+    Takes the current state (x1, v1, x2, v2), the physical parameters
+    (m1, m2, k1, k2, c1, c2), the current time t, and a time step dt, and
+    returns the state (x1, v1, x2, v2) at time t + dt. dt does not need to
+    be small: this integrates the equations of motion with
+    scipy.integrate.solve_ivp (adaptive step size) rather than taking a
+    single fixed step, so it stays accurate even for a large dt. This makes
+    it suitable as the forecast step for an ensemble member with its own
+    state and parameters, e.g. in an EnKF loop.
+
+    The external force on mass2, external_force_on_mass2(t), is looked up
+    the same way as in coupled_oscillator_equations.
+    """
+
+    def state_derivative(time_value, state):
+        x1_, v1_, x2_, v2_ = state
+
+        coupling_displacement = x1_ - x2_
+        coupling_velocity = v1_ - v2_
+
+        force1 = -k1 * x1_ - c1 * v1_ - k2 * coupling_displacement - c2 * coupling_velocity
+        force2 = k2 * coupling_displacement + c2 * coupling_velocity + external_force_on_mass2(time_value)
+
+        a1 = force1 / m1
+        a2 = force2 / m2
+
+        return [v1_, a1, v2_, a2]
+
+    step_solution = solve_ivp(
+        fun=state_derivative,
+        t_span=(t, t + dt),
+        y0=[x1, v1, x2, v2],
+        method=method,
+        rtol=rtol,
+        atol=atol,
+    )
+
+    x1_next, v1_next, x2_next, v2_next = step_solution.y[:, -1]
+    return x1_next, v1_next, x2_next, v2_next
+
+
+# ---------------------------------------------------------------------------
 # Run the simulation
 # ---------------------------------------------------------------------------
 
